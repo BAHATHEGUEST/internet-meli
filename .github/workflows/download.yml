@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 
+          
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13' 
@@ -22,23 +25,26 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
 
-
       - name: Commit and Pull
         run: |
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          
           git add downloads/
           git diff --cached --quiet || (git commit -m "[UPDATE] downloaded files via Python")
-          git pull --rebase --autostash origin master
+          
+          # استفاده از نام شاخه داینامیک
+          git pull --rebase --autostash origin $BRANCH_NAME
           
 
       - name: Push changes
         run: |
+          BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+          
           n=0
           until [ $n -ge 5 ]
           do
-            git push origin HEAD:master && break
+            git push origin HEAD:$BRANCH_NAME && break
             n=$((n+1))
             echo "Push failed. Retrying in 5 seconds... ($n/5)"
             sleep 5
           done
-
-   
