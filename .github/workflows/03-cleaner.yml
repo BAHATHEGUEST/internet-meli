@@ -1,20 +1,15 @@
-name: 🗑 3-Clean downloads folder
+name: 🗑 3-Clean Repo
 
 on:
   workflow_dispatch:
     inputs:
-      target_commit:
-        description: 'Commit hash or tag to reset to (optional, default = safe-baseline)'
-        required: false
-        default: ''
-      force_clean_folders:
-        description: 'Also delete contents of downloads/, pages/, videos/ and create empty commit?'
-        required: false
-        default: 'false'
-        type: boolean
+      target_tag:
+        description: 'Tag to reset to (must be >= v1.1, e.g. v1.2, v2.0)'
+        required: true
+        default: 'v1.1'
 
 jobs:
-  reset-or-clean:
+  reset:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,72 +20,46 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set baseline commit (tag or create if not exists)
-        id: baseline
+      - name: Validate tag exists and is >= v1.1
+        id: validate
         run: |
-          BASELINE_TAG="safe-baseline"
-          if git rev-parse "$BASELINE_TAG" >/dev/null 2>&1; then
-            BASELINE_HASH=$(git rev-parse "$BASELINE_TAG")
-            echo "✅ Baseline tag exists: $BASELINE_HASH"
-          else
-            BASELINE_HASH=$(git rev-parse HEAD)
-            git tag "$BASELINE_TAG" "$BASELINE_HASH"
-            git push origin "$BASELINE_TAG"
-            echo "🏷️ Created baseline tag on commit $BASELINE_HASH"
-          fi
-          echo "hash=$BASELINE_HASH" >> $GITHUB_OUTPUT
+          BASELINE="v1.1"
+          TARGET="${{ github.event.inputs.target_tag }}"
 
-      - name: Optionally clean folders and commit (before reset)
-        if: inputs.force_clean_folders == 'true'
-        run: |
-          find downloads/ -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
-          find pages/ -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
-          find videos/ -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
-
-          git rm --cached -r downloads/* 2>/dev/null || true
-          git rm --cached -r pages/* 2>/dev/null || true
-          git rm --cached -r videos/* 2>/dev/null || true
-
-          git add downloads pages videos
-          if ! git diff --staged --quiet; then
-            git config user.name "github-actions"
-            git config user.email "actions@github.com"
-            git commit -m "Clean empty folders [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
-            echo "🧹 Cleanup commit created"
-          else
-            echo "📭 No changes to commit"
-          fi
-
-      - name: Determine target commit (with safety check)
-        id: target
-        run: |
-          BASELINE="${{ steps.baseline.outputs.hash }}"
-          TARGET_INPUT="${{ github.event.inputs.target_commit }}"
-
-          if [ -z "$TARGET_INPUT" ]; then
-            TARGET="$BASELINE"
-            echo "🔒 No target provided, using baseline: $TARGET"
-          else
-            TARGET_HASH=$(git rev-parse "$TARGET_INPUT" 2>/dev/null) || {
-              echo "❌ Invalid commit: $TARGET_INPUT"
-              exit 1
-            }
-            TARGET="$TARGET_HASH"
-          fi
-
-          if git merge-base --is-ancestor "$BASELINE" "$TARGET"; then
-            echo "✅ Target $TARGET is not older than baseline"
-          else
-            echo "🚫 Target $TARGET is OLDER than baseline ($BASELINE). Aborting."
-            echo "   شما نمی‌توانید به کامیتی قبل از safe-baseline برگردید."
+          if ! git rev-parse "$TARGET" >/dev/null 2>&1; then
+            echo "❌ Tag '$TARGET' does not exist"
             exit 1
           fi
 
-          echo "hash=$TARGET" >> $GITHUB_OUTPUT
+          version_ge() {
+            local v1="${1#v}"
+            local v2="${2#v}"
+            IFS='.' read -ra arr1 <<< "$v1"
+            IFS='.' read -ra arr2 <<< "$v2"
+            for i in 0 1 2; do
+              num1=${arr1[i]:-0}
+              num2=${arr2[i]:-0}
+              if (( num1 > num2 )); then
+                return 0
+              elif (( num1 < num2 )); then
+                return 1
+              fi
+            done
+            return 0
+          }
 
-      - name: Force reset to target commit
+          if version_ge "$TARGET" "$BASELINE"; then
+            echo "✅ $TARGET >= $BASELINE - proceeding"
+          else
+            echo "❌ $TARGET is older (smaller) than $BASELINE. Aborting."
+            exit 1
+          fi
+
+          HASH=$(git rev-parse "$TARGET")
+          echo "target_hash=$HASH" >> $GITHUB_OUTPUT
+
+      - name: Force reset to target tag
         run: |
-          git reset --hard "${{ steps.target.outputs.hash }}"
+          git reset --hard "${{ steps.validate.outputs.target_hash }}"
           git push --force origin HEAD:${{ github.ref_name }}
-          echo "🔁 Repository force-reset to ${{ steps.target.outputs.hash }}"
+          echo "🔁 Repository force-reset to tag ${{ github.event.inputs.target_tag }} (commit ${{ steps.validate.outputs.target_hash }})"
