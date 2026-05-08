@@ -3,39 +3,94 @@ name: 🗑 3-Clean downloads folder
 on:
   workflow_dispatch:
     inputs:
-      warning:
-        description: '⚠️ WARNING: This will DELETE ALL files inside downloads/ folder. Click "Run workflow" only if you are sure.'
+      target_commit:
+        description: 'Commit hash or tag to reset to (optional, default = safe-baseline)'
         required: false
-        default: 'Read this warning before proceeding'
+        default: ''
+      force_clean_folders:
+        description: 'Also delete contents of downloads/, pages/, videos/ and create empty commit?'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
-  delete:
+  reset-or-clean:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout full history
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Remove downloads folder and recreate it
+      - name: Set baseline commit (tag or create if not exists)
+        id: baseline
         run: |
-          find downloads/ -mindepth 1 ! -name '.gitkeep' -delete
-          git rm --cached -r downloads/*
-          find pages/ -mindepth 1 ! -name '.gitkeep' -delete
-          git rm --cached -r pages/*
-
-      - name: Commit and push empty folder
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
-          git add downloads
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
+          BASELINE_TAG="safe-baseline"
+          if git rev-parse "$BASELINE_TAG" >/dev/null 2>&1; then
+            BASELINE_HASH=$(git rev-parse "$BASELINE_TAG")
+            echo "✅ Baseline tag exists: $BASELINE_HASH"
           else
-            git commit -m "[HASANAHANI] Empty downloads folder [skip ci]"
-            git pull --rebase origin "${{ github.ref_name }}"
-            git push origin HEAD:"${{ github.ref_name }}"
-            echo "✅ downloads folder cleared"
+            BASELINE_HASH=$(git rev-parse HEAD)
+            git tag "$BASELINE_TAG" "$BASELINE_HASH"
+            git push origin "$BASELINE_TAG"
+            echo "🏷️ Created baseline tag on commit $BASELINE_HASH"
           fi
+          echo "hash=$BASELINE_HASH" >> $GITHUB_OUTPUT
+
+      - name: Optionally clean folders and commit (before reset)
+        if: inputs.force_clean_folders == 'true'
+        run: |
+          find downloads/ -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+          find pages/ -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+          find videos/ -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+
+          git rm --cached -r downloads/* 2>/dev/null || true
+          git rm --cached -r pages/* 2>/dev/null || true
+          git rm --cached -r videos/* 2>/dev/null || true
+
+          git add downloads pages videos
+          if ! git diff --staged --quiet; then
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git commit -m "Clean empty folders [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+            echo "🧹 Cleanup commit created"
+          else
+            echo "📭 No changes to commit"
+          fi
+
+      - name: Determine target commit (with safety check)
+        id: target
+        run: |
+          BASELINE="${{ steps.baseline.outputs.hash }}"
+          TARGET_INPUT="${{ github.event.inputs.target_commit }}"
+
+          if [ -z "$TARGET_INPUT" ]; then
+            TARGET="$BASELINE"
+            echo "🔒 No target provided, using baseline: $TARGET"
+          else
+            TARGET_HASH=$(git rev-parse "$TARGET_INPUT" 2>/dev/null) || {
+              echo "❌ Invalid commit: $TARGET_INPUT"
+              exit 1
+            }
+            TARGET="$TARGET_HASH"
+          fi
+
+          if git merge-base --is-ancestor "$BASELINE" "$TARGET"; then
+            echo "✅ Target $TARGET is not older than baseline"
+          else
+            echo "🚫 Target $TARGET is OLDER than baseline ($BASELINE). Aborting."
+            echo "   شما نمی‌توانید به کامیتی قبل از safe-baseline برگردید."
+            exit 1
+          fi
+
+          echo "hash=$TARGET" >> $GITHUB_OUTPUT
+
+      - name: Force reset to target commit
+        run: |
+          git reset --hard "${{ steps.target.outputs.hash }}"
+          git push --force origin HEAD:${{ github.ref_name }}
+          echo "🔁 Repository force-reset to ${{ steps.target.outputs.hash }}"

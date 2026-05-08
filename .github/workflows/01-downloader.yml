@@ -439,19 +439,19 @@ jobs:
 
           echo "downloads/README.md created with list of downloaded files"
 
-          # Update root README.md
+          # Update root README.LINKS.md
           SECTION_TITLE="فایل های دانلود شده در گیتهاب شما :"
 
-          if [ ! -f "README.md" ]; then
-            echo "# HASSANAHANI Downloader" > README.md
-            echo "" >> README.md
-            echo "https://hasanahani.ir" >> README.md
-            echo "" >> README.md
+          if [ ! -f "README.LINKS.md" ]; then
+            echo "# HASSANAHANI Downloader" > README.LINKS.md
+            echo "" >> README.LINKS.md
+            echo "https://hasanahani.ir" >> README.LINKS.md
+            echo "" >> README.LINKS.md
           fi
 
-          if grep -q "$SECTION_TITLE" README.md; then
-            sed -i "/$SECTION_TITLE/,/^---$/d" README.md
-            sed -i '${/^$/d;}' README.md
+          if grep -q "$SECTION_TITLE" README.LINKS.md; then
+            sed -i "/$SECTION_TITLE/,/^---$/d" README.LINKS.md
+            sed -i '${/^$/d;}' README.LINKS.md
           fi
 
           {
@@ -469,9 +469,9 @@ jobs:
               fi
             done
             echo "---"
-          } >> README.md
+          } >> README.LINKS.md
 
-          echo "README.md updated with download links"
+          echo "README.LINKS.md updated with download links"
 
       - name: Commit & Push in batches of 5 files (HASSANAHANI)
         run: |
