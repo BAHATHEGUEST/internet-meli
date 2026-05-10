@@ -118,6 +118,19 @@ jobs:
           fi
           echo "Downloading extensions: $MEDIA_EXT"
 
+          # Helper function to resolve URLs
+          resolve_url() {
+            local link="$1"
+            if [[ "$link" =~ ^https?:// ]]; then
+              echo "$link"
+            elif [[ "$link" = /* ]]; then
+              echo "${BASE_URL}${link}"
+            else
+              local PAGE_DIR=$(dirname "$URL")
+              echo "${PAGE_DIR}/${link}"
+            fi
+          }
+
           > "$FOLDER/media_links.txt"
           > "$FOLDER/other_links.txt"
           > "$FOLDER/downloaded_media.md"
@@ -127,18 +140,7 @@ jobs:
           while IFS= read -r link; do
             [ -z "$link" ] && continue
             
-            # Proper URL resolution
-            if [[ "$link" =~ ^https?:// ]]; then
-              # Already absolute URL with protocol
-              ABSOLUTE_URL="$link"
-            elif [[ "$link" = /* ]]; then
-              # Root-relative: starts with /
-              ABSOLUTE_URL="${BASE_URL}${link}"
-            else
-              # Relative path: resolve against page URL directory
-              PAGE_DIR=$(dirname "$URL")
-              ABSOLUTE_URL="${PAGE_DIR}/${link}"
-            fi
+            ABSOLUTE_URL=$(resolve_url "$link")
 
             ext="${link##*.}"
             ext_lower=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
@@ -151,7 +153,7 @@ jobs:
               curl -L --retry 2 --max-time 60 -o "$MEDIA_FOLDER/$FILENAME" "$ABSOLUTE_URL" 2>/dev/null && {
                 FILE_SIZE=$(stat -c%s "$MEDIA_FOLDER/$FILENAME" 2>/dev/null || echo 0)
                 if [ "$FILE_SIZE" -gt 0 ]; then
-                  echo "$link" >> "$FOLDER/media_links.txt"
+                  echo "$ABSOLUTE_URL" >> "$FOLDER/media_links.txt"
                   if [[ "$ext_lower" =~ ^(png|jpg|jpeg|gif|svg|webp)$ ]]; then
                     echo "![$FILENAME](./media/$FILENAME)" >> "$FOLDER/downloaded_media.md"
                   else
@@ -161,7 +163,7 @@ jobs:
                 fi
               } || echo "Failed: $ABSOLUTE_URL"
             else
-              echo "$link" >> "$FOLDER/other_links.txt"
+              echo "$ABSOLUTE_URL" >> "$FOLDER/other_links.txt"
             fi
           done < "$FOLDER/all_links.txt"
 
