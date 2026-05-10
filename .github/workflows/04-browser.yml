@@ -7,6 +7,11 @@ on:
         description: 'URL to visit'
         required: true
         type: string
+      extensions:
+        description: 'File extensions to download (comma separated)'
+        required: false
+        type: string
+        default: 'jpg,jpeg,png,gif,svg,webp,bmp,ico'
 
 jobs:
   browse:
@@ -57,6 +62,8 @@ jobs:
           ENDOFSCRIPT
 
       - name: Visit URL and download media
+        env:
+          USER_EXTENSIONS: ${{ github.event.inputs.extensions }}
         run: |
           RAW_URL="${{ github.event.inputs.url }}"
           
@@ -79,8 +86,10 @@ jobs:
           
           echo "Visiting $URL"
 
-          # Extract domain (remove protocol and optional www)
+          # Extract domain and base URL properly
           DOMAIN=$(echo "$URL" | awk -F/ '{print $3}' | sed 's/^www\.//')
+          PROTOCOL=$(echo "$URL" | awk -F/ '{print $1}')
+          BASE_URL="${PROTOCOL}//${DOMAIN}"
           
           SLUG=$(echo "$URL" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-100)
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -101,8 +110,13 @@ jobs:
           grep -oP 'src="\K[^"]*' "$FOLDER/page.html" | sort -u >> "$FOLDER/all_links.txt"
           sort -u "$FOLDER/all_links.txt" -o "$FOLDER/all_links.txt"
 
-          # Media types to download
-          MEDIA_EXT="png|jpg|jpeg|gif|svg|webp|bmp|ico|mp3|wav|ogg|flac|aac|mp4|webm|avi|mov|mkv|pdf|doc|docx|xls|xlsx|ppt|pptx|zip|rar|tar|gz|7z"
+          # Use user-provided extensions or default
+          if [ -n "$USER_EXTENSIONS" ]; then
+            MEDIA_EXT=$(echo "$USER_EXTENSIONS" | sed 's/,/|/g' | sed 's/ //g')
+          else
+            MEDIA_EXT="jpg|jpeg|png|gif|svg|webp|bmp|ico"
+          fi
+          echo "Downloading extensions: $MEDIA_EXT"
 
           > "$FOLDER/media_links.txt"
           > "$FOLDER/other_links.txt"
@@ -110,19 +124,20 @@ jobs:
           echo "## Downloaded Media Files" > "$FOLDER/downloaded_media.md"
           echo "" >> "$FOLDER/downloaded_media.md"
 
-          # Base URL for resolving relative links
-          BASE_URL="${URL%%/*}"
-          BASE_DOMAIN=$(echo "$URL" | awk -F/ '{print $3}')
-
           while IFS= read -r link; do
             [ -z "$link" ] && continue
             
-            if [[ "$link" = /* ]]; then
-              ABSOLUTE_URL="${BASE_URL}${link}"
-            elif [[ "$link" =~ ^https?:// ]]; then
+            # Proper URL resolution
+            if [[ "$link" =~ ^https?:// ]]; then
+              # Already absolute URL with protocol
               ABSOLUTE_URL="$link"
+            elif [[ "$link" = /* ]]; then
+              # Root-relative: starts with /
+              ABSOLUTE_URL="${BASE_URL}${link}"
             else
-              ABSOLUTE_URL="${BASE_URL}/${link}"
+              # Relative path: resolve against page URL directory
+              PAGE_DIR=$(dirname "$URL")
+              ABSOLUTE_URL="${PAGE_DIR}/${link}"
             fi
 
             ext="${link##*.}"
